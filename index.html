@@ -11,19 +11,19 @@
 			<div class="spawner-panel">
 				<h4>Organism Palette</h4>
 				<div class="spawner-item" id="plant-spawner">
-					<canvas id="plant-spawner-canvas" width="80" height="80"></canvas>
+					<canvas id="plant-spawner-canvas" width="40" height="40"></canvas>
 					<span>Basic Plant</span>
 				</div>
 				<div class="spawner-item" id="populous-spawner">
-					<canvas id="populous-spawner-canvas" width="80" height="80"></canvas>
+					<canvas id="populous-spawner-canvas" width="40" height="40"></canvas>
 					<span>Top Species</span>
 				</div>
 				<div class="spawner-item" id="animal-spawner">
-					<canvas id="animal-spawner-canvas" width="80" height="80"></canvas>
+					<canvas id="animal-spawner-canvas" width="40" height="40"></canvas>
 					<span>Basic Animal</span>
 				</div>
 				<div class="spawner-item" id="smart-animal-spawner">
-					<canvas id="smart-animal-spawner-canvas" width="80" height="80"></canvas>
+					<canvas id="smart-animal-spawner-canvas" width="40" height="40"></canvas>
 					<span>Smart Animal</span>
 				</div>
 			</div>
@@ -38,16 +38,18 @@
 				<div id="cell-legend" class="legend"></div>
 			</div>
 
-			<div class="control-panel">
-				<h3>Statistics</h3>
-				<div class="stats-display control-group">
-					<p>Population: <span id="populationCount">0</span></p>
-					<p>Max Age: <span id="maxAge">0</span></p>
-					<p>Species Count: <span id="speciesCount">0</span></p>
-					<p>Top Species Pop: <span id="topSpeciesPop">0</span></p>
-					<p>Avg Energy: <span id="avgEnergy">0</span></p>
+			<div class="sidebar-right">
+				<div class="stats-panel">
+					<h3>Statistics</h3>
+					<div class="stats-display">
+						<p>Population: <span id="populationCount">0</span></p>
+						<p>Max Age: <span id="maxAge">0</span></p>
+						<p>Species Count: <span id="speciesCount">0</span></p>
+						<p>Top Species Pop: <span id="topSpeciesPop">0</span></p>
+						<p>Avg Energy: <span id="avgEnergy">0</span></p>
+					</div>
 				</div>
-
+				<div class="control-panel">
 				<h3>Simulation Controls</h3>
 				<div class="control-group">
 					<label for="speedSlider">Speed</label>
@@ -190,6 +192,7 @@
 						<input type="checkbox" id="moversAreMouthsCheckbox">
 						<span>Movers are also Mouths</span>
 					</label>
+				</div>
 				</div>
 			</div>
 		</div>

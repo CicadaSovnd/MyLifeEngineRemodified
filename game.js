@@ -125,6 +125,28 @@ document.addEventListener('DOMContentLoaded', () => {
         MUTAGEN: { name: 'Mutagen', color: '#9B59B6' }, // Purple
     };
 
+    const DIRECTIONS = {
+        UP:         { x: 0,  y: -1, name: 'UP' },
+        DOWN:       { x: 0,  y: 1,  name: 'DOWN' },
+        LEFT:       { x: -1, y: 0,  name: 'LEFT' },
+        RIGHT:      { x: 1,  y: 0,  name: 'RIGHT' },
+        UP_LEFT:    { x: -1, y: -1, name: 'UP_LEFT' },
+        UP_RIGHT:   { x: 1,  y: -1, name: 'UP_RIGHT' },
+        DOWN_LEFT:  { x: -1, y: 1,  name: 'DOWN_LEFT' },
+        DOWN_RIGHT: { x: 1,  y: 1,  name: 'DOWN_RIGHT' },
+    };
+    DIRECTIONS.LIST = Object.values(DIRECTIONS);
+    DIRECTIONS.OPPOSITES = {
+        UP: DIRECTIONS.DOWN,
+        DOWN: DIRECTIONS.UP,
+        LEFT: DIRECTIONS.RIGHT,
+        RIGHT: DIRECTIONS.LEFT,
+        UP_LEFT: DIRECTIONS.DOWN_RIGHT,
+        UP_RIGHT: DIRECTIONS.DOWN_LEFT,
+        DOWN_LEFT: DIRECTIONS.UP_RIGHT,
+        DOWN_RIGHT: DIRECTIONS.UP_LEFT,
+    };
+
     const Decision = {
         NEUTRAL: 0,
         RETREAT: 1,
@@ -147,8 +169,8 @@ document.addEventListener('DOMContentLoaded', () => {
             this.decisions[CELL_TYPES.KILLER.name] = Decision.RETREAT;
         }
 
-        observe(entity, x, y, distance) {
-            this.observations.push({ entity, x, y, distance });
+        observe(entity, x, y, distance, direction) {
+            this.observations.push({ entity, x, y, distance, direction });
         }
 
         decide(currentX, currentY) {
@@ -179,17 +201,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (decisionType === Decision.CHASE) {
-                const moveX = Math.sign(closestObs.x - currentX);
-                const moveY = Math.sign(closestObs.y - currentY);
-                return { moveX, moveY };
+                const moveX = closestObs.direction.x;
+                const moveY = closestObs.direction.y;
+                return { moveX, moveY, isDirected: true };
             } else if (decisionType === Decision.RETREAT) {
-                const moveX = -Math.sign(closestObs.x - currentX);
-                const moveY = -Math.sign(closestObs.y - currentY);
-                return { moveX, moveY };
+                const oppositeDir = DIRECTIONS.OPPOSITES[closestObs.direction.name];
+                const moveX = oppositeDir.x;
+                const moveY = oppositeDir.y;
+                return { moveX, moveY, isDirected: true };
             }
 
             // Neutral or unknown, move randomly
-            return { moveX: Math.floor(Math.random() * 3) - 1, moveY: Math.floor(Math.random() * 3) - 1 };
+            return { moveX: Math.floor(Math.random() * 3) - 1, moveY: Math.floor(Math.random() * 3) - 1, isDirected: false };
         }
 
         mutate() {
@@ -224,6 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this.health = this.cells.length;
             this.lifespan = this.cells.length * CONFIG.LIFESPAN_MULTIPLIER;
             this.rotation = 0; // 0: Up, 1: Right, 2: Down, 3: Left
+            this.ignoreBrainTicks = 0;
             this.brain = new Brain();
 
             if (parent) {
@@ -275,14 +299,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         update() {
             this.age++;
-            this.energy -= CONFIG.METABOLIC_COST; // Metabolic cost
+
+            const hasMover = this.cells.some(c => c.type === CELL_TYPES.MOVER);
+
+            // Metabolic cost is only applied to mobile organisms, as in the original game.
+            if (hasMover) {
+                this.energy -= CONFIG.METABOLIC_COST;
+            }
 
             if (this.age > this.lifespan || this.energy <= 0 || this.health <= 0) {
                 this.die();
                 return;
             }
 
-            this.performCellFunctions();            
+            this.performCellFunctions(hasMover);
             if (this.energy >= this.getReproductionCost()) {
                 this.reproduce();
             }
@@ -294,9 +324,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return (this.cells.length * CONFIG.FRESH_FOOD_ENERGY) + CONFIG.REPRODUCTION_ENERGY_COST;
         }
 
-        performCellFunctions() {
-            const hasMover = this.cells.some(c => c.type === CELL_TYPES.MOVER);
-            
+        performCellFunctions(hasMover) {
             this.cells.forEach(cell => {
                 const rotated = this.getRotatedCoords(cell);
                 const pos = getGridPosition(this.x + rotated.x, this.y + rotated.y);
@@ -321,18 +349,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         observe(eyeX, eyeY) {
             const lookRange = CONFIG.LOOK_RANGE;
-            const angle = Math.random() * 2 * Math.PI; // Look in a random direction
 
-            for (let i = 1; i <= lookRange; i++) {
-                const pos = getGridPosition(eyeX + Math.round(Math.cos(angle) * i), eyeY + Math.round(Math.sin(angle) * i));
-                if (!pos) continue; // Stop looking if we hit the edge of the world
+            // Scan in all 8 directions from the eye cell
+            for (const direction of DIRECTIONS.LIST) {
+                for (let i = 1; i <= lookRange; i++) {
+                    const pos = getGridPosition(eyeX + direction.x * i, eyeY + direction.y * i);
+                    if (!pos) break; // Stop looking if we hit the edge of the world
 
-                const entity = grid[pos.x][pos.y];
-                if (entity && entity.type !== ENTITY_TYPE.EMPTY) {
-                    if (entity.owner === this) continue; // Ignore self
-
-                    this.brain.observe(entity, pos.x, pos.y, i);
-                    return; // Stop after seeing the first thing
+                    const entity = grid[pos.x][pos.y];
+                    if (entity && entity.type !== ENTITY_TYPE.EMPTY) {
+                        if (entity.owner !== this) {
+                            this.brain.observe(entity, pos.x, pos.y, i, direction);
+                        }
+                        break; // Found something in this direction, move to the next
+                    }
                 }
             }
         }
@@ -442,8 +472,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         move() {
-            const { moveX, moveY } = this.brain.decide(this.x, this.y);
+            let moveX, moveY, isDirected;
 
+            if (this.ignoreBrainTicks > 0) {
+                this.ignoreBrainTicks--;
+                moveX = Math.floor(Math.random() * 3) - 1;
+                moveY = Math.floor(Math.random() * 3) - 1;
+                isDirected = false;
+            } else {
+                const brainDecision = this.brain.decide(this.x, this.y);
+                moveX = brainDecision.moveX;
+                moveY = brainDecision.moveY;
+                isDirected = brainDecision.isDirected;
+            }
+            
             const prospectiveX = this.x + moveX;
             const prospectiveY = this.y + moveY;
 
@@ -474,56 +516,57 @@ document.addEventListener('DOMContentLoaded', () => {
                 return true; // This cell's path is clear
             });
 
-            const clearCurrentPosition = () => {
-                this.cells.forEach(cell => {
-                    const rotated = this.getRotatedCoords(cell);
-                    const pos = getGridPosition(this.x + rotated.x, this.y + rotated.y);
-                    if (pos) {
-                        const gridCell = grid[pos.x][pos.y];
-                        // This is a paranoid check to prevent race conditions. An organism can only
-                        // clear a grid space if it's absolutely certain it's one of its own cells.
-                        if (gridCell.owner === this && gridCell.cellRef === cell) {
-                            grid[pos.x][pos.y] = { type: ENTITY_TYPE.EMPTY };
-                        }
-                    }
-                });
-            };
-
-            const setCurrentPosition = () => {
-                this.cells.forEach(cell => {
-                    const rotated = this.getRotatedCoords(cell);
-                    const pos = getGridPosition(this.x + rotated.x, this.y + rotated.y);
-                    if (pos) {
-                        grid[pos.x][pos.y] = { type: ENTITY_TYPE.ORGANISM_CELL, owner: this, cellRef: cell };
-                    }
-                });
-            };
-
             if (canMove) {
-                clearCurrentPosition();
+                this.clearFromGrid();
                 this.x = CONFIG.WORLD_WRAPPING ? (prospectiveX + COLS) % COLS : prospectiveX;
                 this.y = CONFIG.WORLD_WRAPPING ? (prospectiveY + ROWS) % ROWS : prospectiveY;
-                setCurrentPosition();
-            } else if (CONFIG.ROTATION_ENABLED) {
-                // If blocked, try to rotate instead of moving.
-                const newRotation = (this.rotation + 1) % 4;
-
-                // Check if the new rotation is valid before applying it.
-                const canRotate = this.cells.every(cell => {
-                    const rotated = this.getRotatedCoords(cell, newRotation);
-                    const pos = getGridPosition(this.x + rotated.x, this.y + rotated.y);
-                    if (!pos) return false; // Can't rotate into world edge
-                    const targetCell = grid[pos.x][pos.y];
-                    // Can only rotate if the new position is empty or part of our own body
-                    return targetCell.type === ENTITY_TYPE.EMPTY || targetCell.owner === this;
-                });
-
-                if (canRotate) {
-                    clearCurrentPosition();
-                    this.rotation = newRotation;
-                    setCurrentPosition();
+                this.placeOnGrid();
+            } else {
+                // Movement failed.
+                if (isDirected) {
+                    // The brain's plan failed. Get unstuck.
+                    this.ignoreBrainTicks = 5;
                 }
+                // In any case of failed movement, try to rotate.
+                this.attemptRotation();
             }
+        }
+
+        attemptRotation() {
+            if (!CONFIG.ROTATION_ENABLED) return;
+
+            const newRotation = (this.rotation + 1) % 4;
+
+            // Check if the new rotation is valid before applying it.
+            const canRotate = this.cells.every(cell => {
+                const rotated = this.getRotatedCoords(cell, newRotation);
+                const pos = getGridPosition(this.x + rotated.x, this.y + rotated.y);
+                if (!pos) return false; // Can't rotate into world edge
+                const targetCell = grid[pos.x][pos.y];
+                // Can only rotate if the new position is empty or part of our own body
+                return targetCell.type === ENTITY_TYPE.EMPTY || targetCell.owner === this;
+            });
+
+            if (canRotate) {
+                this.clearFromGrid();
+                this.rotation = newRotation;
+                this.placeOnGrid();
+            }
+        }
+
+        clearFromGrid() {
+            this.cells.forEach(cell => {
+                const rotated = this.getRotatedCoords(cell);
+                const pos = getGridPosition(this.x + rotated.x, this.y + rotated.y);
+                if (pos) {
+                    const gridCell = grid[pos.x][pos.y];
+                    // This is a paranoid check to prevent race conditions. An organism can only
+                    // clear a grid space if it's absolutely certain it's one of its own cells.
+                    if (gridCell.owner === this && gridCell.cellRef === cell) {
+                        grid[pos.x][pos.y] = { type: ENTITY_TYPE.EMPTY };
+                    }
+                }
+            });
         }
 
         reproduce() {
@@ -634,7 +677,7 @@ document.addEventListener('DOMContentLoaded', () => {
         die() {
             this.cells.forEach(cell => {
                 const rotated = this.getRotatedCoords(cell);
-                const pos = getGridPosition(this.x + rotated.x, this.y + rotated.y);                
+                const pos = getGridPosition(this.x + rotated.x, this.y + rotated.y);
                 if (pos) {
                     // Only convert the cell to food if this organism still occupies it.
                     // This prevents destroying parts of other organisms in a race condition.
@@ -658,6 +701,75 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     };
+
+    function rebuildAfterResize() {
+        // 1. Store the current state
+        const oldOrganisms = [...organisms];
+        const oldFood = [];
+        for (const coord of foodCoords) {
+            const foodCell = grid[coord.x][coord.y];
+            if (foodCell.type === ENTITY_TYPE.FOOD) {
+                oldFood.push({ ...coord, ...foodCell });
+            }
+        }
+        const oldCols = COLS;
+        const oldRows = ROWS;
+
+        // 2. Pause the simulation and update dimensions
+        isPaused = true;
+        startPauseBtn.textContent = 'Start';
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+        }
+        updateDimensions(); // This sets new COLS and ROWS
+
+        // 3. Create a new, empty grid and clear current state arrays
+        grid = buildGrid();
+        organisms = [];
+        foodCoords = [];
+
+        // 4. Attempt to place old organisms onto the new grid
+        oldOrganisms.forEach(org => {
+            // Scale position to the new grid size
+            org.x = Math.round(org.x * (COLS / oldCols));
+            org.y = Math.round(org.y * (ROWS / oldRows));
+
+            // Make sure the organism is within the new bounds
+            if (org.x >= COLS) org.x = COLS - 1;
+            if (org.y >= ROWS) org.y = ROWS - 1;
+
+            const canPlace = org.cells.every(cell => {
+                const rotated = org.getRotatedCoords(cell);
+                const pos = getGridPosition(org.x + rotated.x, org.y + rotated.y);
+                return pos && grid[pos.x][pos.y].type === ENTITY_TYPE.EMPTY;
+            });
+
+            if (canPlace) {
+                organisms.push(org);
+                org.placeOnGrid();
+            }
+        });
+
+        // 5. Attempt to place old food onto the new grid
+        oldFood.forEach(food => {
+            // Scale position to the new grid size
+            const newX = Math.round(food.x * (COLS / oldCols));
+            const newY = Math.round(food.y * (ROWS / oldRows));
+
+            // Make sure the food is within the new bounds
+            if (newX >= COLS || newY >= ROWS) return;
+
+            // Only place food if the spot is empty
+            if (grid[newX][newY].type === ENTITY_TYPE.EMPTY) {
+                grid[newX][newY] = { type: ENTITY_TYPE.FOOD, state: food.state, age: food.age, spots: food.spots };
+                foodCoords.push({ x: newX, y: newY });
+            }
+        });
+
+        // 6. Redraw and update stats
+        drawGrid();
+        updateStats();
+    }
 
     // --- Spawner and Painting Functions ---
 
@@ -730,7 +842,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Calculate canvas size to fit the container while maintaining a 4:3 aspect ratio
         const containerWidth = container.clientWidth;
-        const newWidth = Math.min(containerWidth, 800); // Use a max-width of 800
+        const newWidth = Math.min(containerWidth, 1400); // Use a max-width of 1400 for desktop
         const newHeight = Math.floor(newWidth * (600 / 800));
 
         // Update config and canvas element
@@ -1036,49 +1148,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.fillStyle = CONFIG.COLORS.BACKGROUND;
                 ctx.fillRect(x, y, CONFIG.RESOLUTION, CONFIG.RESOLUTION);
 
-                // --- Draw Cell Content (Food or Organism) ---
-                let contentFill = null;
+                // --- 2. Draw base cell color (food or default organism view) ---
+                let baseCellColor = null;
                 if (gridEntity.type === ENTITY_TYPE.FOOD) {
                     switch (gridEntity.state) {
                         case 'fresh':
-                            contentFill = CONFIG.COLORS.FRESH_FOOD;
+                            baseCellColor = CONFIG.COLORS.FRESH_FOOD;
                             break;
                         case 'rotten':
-                            contentFill = CONFIG.COLORS.ROTTEN_FOOD;
+                            baseCellColor = CONFIG.COLORS.ROTTEN_FOOD;
                             break;
                         default: // 'regular'
-                            contentFill = CONFIG.COLORS.FOOD;
+                            baseCellColor = CONFIG.COLORS.FOOD;
                     }
+                } else if (gridEntity.type === ENTITY_TYPE.ORGANISM_CELL && !CONFIG.INNER_ROUNDED_SKIN) {
+                    const cell = gridEntity.cellRef;
+                    baseCellColor = (cell.type === CELL_TYPES.MOUTH && cell.stage === 2) ? '#FFB300' : cell.type.color;
                 }
 
-                if (contentFill) {
-                    ctx.fillStyle = contentFill;
+                if (baseCellColor) {
+                    ctx.fillStyle = baseCellColor;
                     ctx.fillRect(x, y, CONFIG.RESOLUTION, CONFIG.RESOLUTION);
                 }
 
-                // --- Draw Cell Details (Pupils, Spots) ---
-                if (gridEntity.type === ENTITY_TYPE.ORGANISM_CELL && gridEntity.cellRef.type === CELL_TYPES.EYE) {
-                    ctx.fillStyle = '#000000'; // Black
-                    const pupilSize = Math.max(1, Math.floor(CONFIG.RESOLUTION / 3));
-                    const pupilOffset = Math.floor((CONFIG.RESOLUTION - pupilSize) / 2);
-                    ctx.fillRect(x + pupilOffset, y + pupilOffset, pupilSize, pupilSize);
-                }
-                if (gridEntity.type === ENTITY_TYPE.FOOD && gridEntity.state === 'rotten') {
-                    ctx.fillStyle = 'rgba(40, 20, 5, 0.6)';
-                    const spotSize = Math.max(1, Math.floor(CONFIG.RESOLUTION / 4));
-                    for (let i = 0; i < 3; i++) {
-                        ctx.fillRect(x + Math.random() * (CONFIG.RESOLUTION - spotSize), y + Math.random() * (CONFIG.RESOLUTION - spotSize), spotSize, spotSize);
-                    }
-                }
-
-                // --- Draw Organism Skin/Border ---
+                // --- 4. Draw Organism Skin/Border ---
                 if (gridEntity.type === ENTITY_TYPE.ORGANISM_CELL) {
                     const owner = gridEntity.owner;
                     const cell = gridEntity.cellRef;
                     const skinColor = owner.speciesId.replace('hsl', 'hsla').replace(')', `, ${CONFIG.SKIN_OPACITY})`);
-                    const cellColor = (cell.type === CELL_TYPES.MOUTH && cell.stage === 2) ? '#FFB300' : cell.type.color;
 
                     if (CONFIG.INNER_ROUNDED_SKIN) {
+                        const cellColor = (cell.type === CELL_TYPES.MOUTH && cell.stage === 2) ? '#FFB300' : cell.type.color;
                         // Fill background with skin color
                         ctx.fillStyle = skinColor;
                         ctx.fillRect(x, y, CONFIG.RESOLUTION, CONFIG.RESOLUTION);
@@ -1089,10 +1189,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         ctx.arc(x + CONFIG.RESOLUTION / 2, y + CONFIG.RESOLUTION / 2, Math.max(1, radius), 0, 2 * Math.PI);
                         ctx.fill();
                     } else {
-                        // Default: Draw cell color as square, then draw border on external edges
-                        ctx.fillStyle = cellColor;
-                        ctx.fillRect(x, y, CONFIG.RESOLUTION, CONFIG.RESOLUTION);
-
+                        // Base color is already drawn. Just add the border.
                         const upPos = getGridPosition(col, row - 1), downPos = getGridPosition(col, row + 1), leftPos = getGridPosition(col - 1, row), rightPos = getGridPosition(col + 1, row);
                         const neighborUp = upPos ? grid[upPos.x][upPos.y] : { owner: null }, neighborDown = downPos ? grid[downPos.x][downPos.y] : { owner: null }, neighborLeft = leftPos ? grid[leftPos.x][leftPos.y] : { owner: null }, neighborRight = rightPos ? grid[rightPos.x][rightPos.y] : { owner: null };
                         const isTopExternal = !neighborUp.owner || neighborUp.owner !== owner, isBottomExternal = !neighborDown.owner || neighborDown.owner !== owner, isLeftExternal = !neighborLeft.owner || neighborLeft.owner !== owner, isRightExternal = !neighborRight.owner || neighborRight.owner !== owner;
@@ -1103,6 +1200,23 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (isBottomExternal) ctx.fillRect(x, y + CONFIG.RESOLUTION - thickness, CONFIG.RESOLUTION, thickness);
                         if (isLeftExternal) ctx.fillRect(x, y, thickness, CONFIG.RESOLUTION);
                         if (isRightExternal) ctx.fillRect(x + CONFIG.RESOLUTION - thickness, y, thickness, CONFIG.RESOLUTION);
+                    }
+                }
+
+                // --- 5. Draw Cell Details on Top (Pupils, Spots) ---
+                if (gridEntity.type === ENTITY_TYPE.ORGANISM_CELL && gridEntity.cellRef.type === CELL_TYPES.EYE) {
+                    ctx.fillStyle = '#000000'; // Black
+                    const pupilSize = Math.max(1, Math.floor(CONFIG.RESOLUTION / 3));
+                    const pupilOffset = Math.floor((CONFIG.RESOLUTION - pupilSize) / 2);
+                    ctx.fillRect(x + pupilOffset, y + pupilOffset, pupilSize, pupilSize);
+                }
+                if (gridEntity.type === ENTITY_TYPE.FOOD && gridEntity.state === 'rotten') {
+                    // Draw static spots if they exist
+                    if (gridEntity.spots) {
+                        ctx.fillStyle = 'rgba(40, 20, 5, 0.6)';
+                        for (const spot of gridEntity.spots) {
+                            ctx.fillRect(x + spot.x, y + spot.y, spot.size, spot.size);
+                        }
                     }
                 }
             }
@@ -1143,6 +1257,16 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (foodCell.state === 'regular' && foodCell.age > CONFIG.FOOD_DECAY_TIME) {
                 foodCell.state = 'rotten';
                 foodCell.age = 0;
+                // Pre-calculate static spots for rotten food to avoid animation
+                foodCell.spots = [];
+                const spotSize = Math.max(1, Math.floor(CONFIG.RESOLUTION / 4));
+                for (let i = 0; i < 3; i++) {
+                    foodCell.spots.push({
+                        x: Math.random() * (CONFIG.RESOLUTION - spotSize),
+                        y: Math.random() * (CONFIG.RESOLUTION - spotSize),
+                        size: spotSize
+                    });
+                }
             }
         }
     }
@@ -1256,7 +1380,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const spawnerItems = [plantSpawner, populousSpawner, animalSpawner, smartAnimalSpawner];
     const basicPlantTemplate = [new Cell(CELL_TYPES.PRODUCER, 0, 0), new Cell(CELL_TYPES.MOUTH, 1, 1)];
     const basicAnimalTemplate = [new Cell(CELL_TYPES.MOUTH, 0, 0), new Cell(CELL_TYPES.MOVER, 0, 1)];
-    const smartAnimalTemplate = [new Cell(CELL_TYPES.MOUTH, 0, 0), new Cell(CELL_TYPES.MOVER, 0, 1), new Cell(CELL_TYPES.EYE, 0, -1)];
+    const smartAnimalTemplate = [new Cell(CELL_TYPES.EYE, 0, 0), new Cell(CELL_TYPES.MOUTH, 0, -1), new Cell(CELL_TYPES.MOVER, 0, 1)];
 
     function selectSpawner(item, template) {
         // Handle case where populous template might be null
@@ -1289,14 +1413,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Add resize listener to make the canvas responsive
+    // Add resize listener to make the canvas responsive (this also handles entering/exiting fullscreen)
     let resizeTimeout;
     window.addEventListener('resize', () => {
         clearTimeout(resizeTimeout);
         // Debounce the resize event to avoid excessive resets while dragging the window
         resizeTimeout = setTimeout(() => {
             setupCanvasSize();
-            performReset(setup); // Reset the simulation with new dimensions
+            rebuildAfterResize(); // Rebuild the simulation with new dimensions
         }, 250);
     });
 
@@ -1397,6 +1521,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     moversAreMouthsCheckbox.addEventListener('change', (e) => {
         CONFIG.MOVERS_ARE_MOUTHS = e.target.checked;
+    });
+    innerRoundedSkinCheckbox.addEventListener('change', (e) => {
+        CONFIG.INNER_ROUNDED_SKIN = e.target.checked;
     });
 
     // --- Initial State ---
