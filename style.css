@@ -184,3 +184,32 @@ input[type="number"] {
     font-size: 0.8rem;
     color: #ccc;
 }
+
+/* --- Responsive Design --- */
+@media (max-width: 1200px) { /* Adjusts for tablets and smaller desktops */
+    .main-container {
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+    }
+
+    .spawner-panel, .control-panel {
+        width: 100%;
+        max-width: 800px; /* Match canvas max width */
+        height: auto; /* Allow panels to grow with content */
+        box-sizing: border-box;
+    }
+
+    .spawner-panel {
+        order: -1; /* Move spawner panel to the top on mobile */
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 480px) { /* Further adjustments for small phone screens */
+    body {
+        padding: 0.5rem;
+    }
+}

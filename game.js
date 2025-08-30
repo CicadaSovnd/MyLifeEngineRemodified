@@ -94,9 +94,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    canvas.width = CONFIG.CANVAS_WIDTH;
-    canvas.height = CONFIG.CANVAS_HEIGHT;
-
     // --- Game State ---
     let grid;
     let organisms = [];
@@ -727,6 +724,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Core Functions ---
 
+    function setupCanvasSize() {
+        const container = canvas.parentElement;
+        if (!container) return;
+
+        // Calculate canvas size to fit the container while maintaining a 4:3 aspect ratio
+        const containerWidth = container.clientWidth;
+        const newWidth = Math.min(containerWidth, 800); // Use a max-width of 800
+        const newHeight = Math.floor(newWidth * (600 / 800));
+
+        // Update config and canvas element
+        CONFIG.CANVAS_WIDTH = newWidth;
+        CONFIG.CANVAS_HEIGHT = newHeight;
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+    }
+
     function getGridPosition(x, y) {
         if (CONFIG.WORLD_WRAPPING) {
             return { x: (x + COLS) % COLS, y: (y + ROWS) % ROWS };
@@ -1276,6 +1289,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Add resize listener to make the canvas responsive
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimeout);
+        // Debounce the resize event to avoid excessive resets while dragging the window
+        resizeTimeout = setTimeout(() => {
+            setupCanvasSize();
+            performReset(setup); // Reset the simulation with new dimensions
+        }, 250);
+    });
+
 
     speedSlider.addEventListener('input', (e) => {
         fps = parseInt(e.target.value, 10);
@@ -1376,12 +1400,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Initial State ---
-    resetBtn.click();
+    setupCanvasSize(); // Set initial canvas size based on the window
+    performReset(setup); // Perform the initial setup
     createLegend();
     drawOrganismPreview(plantSpawnerCanvas, basicPlantTemplate);
     drawOrganismPreview(animalSpawnerCanvas, basicAnimalTemplate);
     drawOrganismPreview(smartAnimalSpawnerCanvas, smartAnimalTemplate);
-    innerRoundedSkinCheckbox.addEventListener('change', (e) => {
-        CONFIG.INNER_ROUNDED_SKIN = e.target.checked;
-    });
 });
